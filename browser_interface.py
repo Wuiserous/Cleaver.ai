@@ -111,6 +111,37 @@ class BrowserRelay:
             await asyncio.sleep(0.5)
 
 
+async def send_enter_key():
+    """
+    Sends a robust Enter key sequence compatible with Google Sheets,
+    Forms, and complex Web Apps.
+    """
+    # 1. Raw Key Down (Virtual Code 13)
+    await relay.send_cdp("Input.dispatchKeyEvent", {
+        "type": "rawKeyDown",
+        "windowsVirtualKeyCode": 13,
+        "code": "Enter",
+        "key": "Enter",
+        "text": "\r",  # Crucial for Sheets
+        "unmodifiedText": "\r"  # Crucial for Sheets
+    })
+
+    # 2. Char Event (The 'Key Press' that actually triggers the input commit)
+    await relay.send_cdp("Input.dispatchKeyEvent", {
+        "type": "char",
+        "text": "\r"
+    })
+
+    # 3. Key Up
+    await relay.send_cdp("Input.dispatchKeyEvent", {
+        "type": "keyUp",
+        "windowsVirtualKeyCode": 13,
+        "code": "Enter",
+        "key": "Enter",
+        "text": "\r",
+        "unmodifiedText": "\r"
+    })
+
 relay = BrowserRelay()
 
 
@@ -162,59 +193,72 @@ async def exec_click_visual(x: int, y: int):
 
 
 async def exec_type_text(text: str):
-    # 1. Detect and strip newline to prevent it from being typed as a character
-    should_submit = False
-    if "\n" in text:
-        should_submit = True
-        text = text.replace("\n", "")  # Clean the text
+    # 1. Clean the input to handle escaped sequences if the LLM sent literal string representations
+    # (e.g., converting actual string "\\n" to character '\n')
+    text = text.replace("\\n", "\n").replace("\\t", "\t")
 
-    # 2. Select all text first so we overwrite
-    safe_select_script = """
-        (function() {
-            const el = document.activeElement;
-            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
-                // If it's a standard input, use .select()
-                if (typeof el.select === 'function') {
-                    el.select();
-                } else {
-                    // Fallback for rich text editors (contentEditable div)
-                    document.execCommand('selectAll', false, null);
+    # 2. Check if we need to clear the INITIAL field before starting.
+    # We only do this if the first character is NOT a control character.
+    # If the string starts with \t or \n, the user intends navigation immediately.
+    if text and text[0] not in ("\n", "\t", "\r"):
+        safe_select_script = """
+            (function() {
+                const el = document.activeElement;
+                if (el) {
+                    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                        el.select();
+                    } else if (el.isContentEditable) {
+                        document.execCommand('selectAll', false, null);
+                    }
                 }
-            }
-        })();
-        """
-    await relay.send_cdp("Runtime.evaluate", {"expression": safe_select_script})
+            })();
+            """
+        await relay.send_cdp("Runtime.evaluate", {"expression": safe_select_script})
 
-    # 3. Type the sanitized text
+    # 3. Process character by character
+    typed_log = []
+
     for char in text:
-        await relay.send_cdp("Input.dispatchKeyEvent", {"type": "keyDown", "text": char, "unmodifiedText": char})
-        await relay.send_cdp("Input.dispatchKeyEvent", {"type": "keyUp", "text": char, "unmodifiedText": char})
-        await asyncio.sleep(random.uniform(0.01, 0.04))
+        if char == "\t":
+            # --- TAB KEY ---
+            await relay.send_cdp("Input.dispatchKeyEvent", {
+                "type": "rawKeyDown", "windowsVirtualKeyCode": 9, "code": "Tab", "key": "Tab"
+            })
+            await relay.send_cdp("Input.dispatchKeyEvent", {
+                "type": "keyUp", "windowsVirtualKeyCode": 9, "code": "Tab", "key": "Tab"
+            })
+            typed_log.append("[Tab]")
+            await asyncio.sleep(0.1)  # Wait for focus to move
 
-    # 4. Execute the Enter command safely if needed
-    if should_submit:
-        await asyncio.sleep(0.1)  # Wait for UI to catch up
+        elif char == "\n" or char == "\r":
+            # --- ENTER KEY ---
+            # Send RawKeyDown + Char (crucial for Sheets) + KeyUp
+            await relay.send_cdp("Input.dispatchKeyEvent", {
+                "type": "rawKeyDown", "windowsVirtualKeyCode": 13, "code": "Enter", "key": "Enter",
+                "text": "\r", "unmodifiedText": "\r"
+            })
+            await relay.send_cdp("Input.dispatchKeyEvent", {
+                "type": "char", "text": "\r"
+            })
+            await relay.send_cdp("Input.dispatchKeyEvent", {
+                "type": "keyUp", "windowsVirtualKeyCode": 13, "code": "Enter", "key": "Enter"
+            })
+            typed_log.append("[Enter]")
+            await asyncio.sleep(0.1)  # Wait for submit/move
 
-        # Send raw Enter key (Code 13) WITHOUT 'text' property
-        # This triggers the 'Submit' action rather than typing a new line
-        await relay.send_cdp("Input.dispatchKeyEvent", {
-            "type": "rawKeyDown",
-            "windowsVirtualKeyCode": 13,
-            "code": "Enter",
-            "key": "Enter"
-        })
-        await asyncio.sleep(0.05)
-        await relay.send_cdp("Input.dispatchKeyEvent", {
-            "type": "keyUp",
-            "windowsVirtualKeyCode": 13,
-            "code": "Enter",
-            "key": "Enter"
-        })
-        return f"Typed: {text} [Enter Pressed]"
+        else:
+            # --- NORMAL CHAR ---
+            await relay.send_cdp("Input.dispatchKeyEvent", {
+                "type": "keyDown", "text": char, "unmodifiedText": char
+            })
+            await relay.send_cdp("Input.dispatchKeyEvent", {
+                "type": "keyUp", "text": char, "unmodifiedText": char
+            })
+            typed_log.append(char)
+            # Very fast typing, but valid
+            await asyncio.sleep(0.01)
 
-    return f"Typed: {text}"
-
-
+    return f"Processed: {''.join(typed_log)}"
 async def exec_scroll(direction: str = "down"):
     # Hybrid Approach: Mouse Wheel + Keyboard Arrow
     # This works on standard pages AND infinite scroll containers
@@ -258,9 +302,9 @@ async def exec_chain(actions: list):
         params = action.get('params', {})
 
         if name == "click_visual":
-            # If clicking an input, we want to ensure focus is settled
             res = await exec_click_visual(params['x'], params['y'])
-            await asyncio.sleep(0.2)
+            # Clicking a cell in sheets requires a moment to register focus
+            await asyncio.sleep(0.3)
         elif name == "type_text":
             res = await exec_type_text(params['text'])
         elif name == "scroll":
@@ -272,33 +316,30 @@ async def exec_chain(actions: list):
         elif name == "press_key":
             key_type = params.get('key', 'Enter')
             if key_type.lower() == 'enter':
-                # Robust Enter Sequence
-                await relay.send_cdp("Input.dispatchKeyEvent", {
-                    "type": "rawKeyDown", "windowsVirtualKeyCode": 13,
-                    "unmodifiedText": "\r", "text": "\r", "code": "Enter", "key": "Enter"
-                })
-                await relay.send_cdp("Input.dispatchKeyEvent", {"type": "char", "text": "\r"})
-                await asyncio.sleep(0.05)
-                await relay.send_cdp("Input.dispatchKeyEvent", {
-                    "type": "keyUp", "windowsVirtualKeyCode": 13,
-                    "unmodifiedText": "\r", "text": "\r", "code": "Enter", "key": "Enter"
-                })
+                await send_enter_key()
                 res = "Pressed Enter"
             else:
-                res = "Unknown Key"
+                # Fallback for other keys (Tab, Escape, etc)
+                # Google Sheets often needs 'Tab' to move right
+                k = key_type.capitalize()
+                code = k
+                if k == "Tab": code = "Tab"
+                if k == "Escape": code = "Escape"
+
+                await relay.send_cdp("Input.dispatchKeyEvent",
+                                     {"type": "rawKeyDown", "windowsVirtualKeyCode": 0, "code": code, "key": k})
+                await relay.send_cdp("Input.dispatchKeyEvent",
+                                     {"type": "keyUp", "windowsVirtualKeyCode": 0, "code": code, "key": k})
+                res = f"Pressed {key_type}"
         else:
             res = "Unknown Action"
 
         results.append(res)
 
-        # Dynamic pause: If this was a click or enter, wait slightly longer for UI reaction
-        if name in ["click_visual", "press_key"]:
-            await asyncio.sleep(0.5)
-        else:
-            await asyncio.sleep(0.1)
+        # Dynamic pause between chain steps
+        await asyncio.sleep(0.3)
 
     return " | ".join(results)
-
 
 TOOL_MAP = {
     "navigate": exec_navigate,
