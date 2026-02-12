@@ -1,0 +1,19 @@
+# Virtual environments
+.venv/
+
+# IDE
+.idea/
+
+# Python cache
+__pycache__/
+
+# Env
+.env
+
+# Databases
+*.db
+*.sqlite
+db_memory/
+
+# Large index files
+*.json
