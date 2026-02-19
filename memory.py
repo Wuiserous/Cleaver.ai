@@ -1,113 +1,107 @@
-import os
-import chromadb
-from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
+import sqlite3
 import datetime
 
-# --- CONFIGURATION ---
-DB_DIR = "db_memory"
-EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
+DB_FILE = "agent_memory.db"
 
 
 class MemoryManager:
     def __init__(self):
-        print("🧠 Initializing Memory Manager (ChromaDB + MiniLM)...")
-        # Initialize Embedding Model (Runs locally)
-        self.encoder = SentenceTransformer(EMBED_MODEL_NAME)
+        self._init_db()
 
-        # Initialize Vector DB (Persistent)
-        self.client = chromadb.PersistentClient(path=DB_DIR, settings=Settings(allow_reset=True))
+    def _get_conn(self):
+        conn = sqlite3.connect(DB_FILE)
+        # ⚡ OPTIMIZATION: Enable Write-Ahead Logging for concurrency
+        conn.execute("PRAGMA journal_mode=WAL;")
+        return conn
 
-        # Collection 1: Conversation History (RAG)
-        self.history_collection = self.client.get_or_create_collection(
-            name="chat_history",
-            metadata={"hnsw:space": "cosine"}
-        )
+    def _init_db(self):
+        conn = self._get_conn()
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS skills 
+                     (name TEXT PRIMARY KEY, code TEXT, description TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS history 
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        try:
+            c.execute('''CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_index USING fts5(content, meta_info)''')
+        except Exception:
+            pass
+        conn.commit()
+        conn.close()
 
-        # Collection 2: Skills/Tools Library
-        self.skills_collection = self.client.get_or_create_collection(
-            name="skills_library",
-            metadata={"hnsw:space": "cosine"}
-        )
-
-    def _get_embedding(self, text):
-        return self.encoder.encode(text).tolist()
-
-    # --- HISTORY / CONTEXT ---
     def save_interaction(self, role, content):
-        """Saves a single message to history."""
-        if not isinstance(content, str):
-            return  # Skip image data for text DB for now
+        conn = self._get_conn()
+        c = conn.cursor()
+        c.execute("INSERT INTO history (role, content) VALUES (?, ?)", (role, str(content)))
+        if len(content) > 10:
+            meta = f"role:{role}|time:{datetime.datetime.now().isoformat()}"
+            c.execute("INSERT INTO knowledge_index (content, meta_info) VALUES (?, ?)", (content, meta))
+        conn.commit()
+        conn.close()
 
-        timestamp = datetime.datetime.now().isoformat()
-        doc_id = f"{timestamp}_{role}"
+    def retrieve_relevant_context(self, current_query, limit=2):  # Reduced limit for speed
+        conn = self._get_conn()
+        c = conn.cursor()
 
-        self.history_collection.add(
-            documents=[content],
-            metadatas=[{"role": role, "timestamp": timestamp}],
-            ids=[doc_id],
-            embeddings=[self._get_embedding(content)]
-        )
+        # FTS Search
+        clean_query = "".join([x if x.isalnum() else " " for x in current_query])
+        search_terms = " OR ".join([f'"{term}"' for term in clean_query.split() if len(term) > 3])
 
-    def retrieve_context(self, query, n_results=5):
-        """Finds past conversations relevant to the current query."""
-        results = self.history_collection.query(
-            query_embeddings=[self._get_embedding(query)],
-            n_results=n_results
-        )
+        context_results = []
+        if search_terms:
+            try:
+                # ⚡ OPTIMIZATION: Limit FTS results strictly
+                c.execute(
+                    f"SELECT content FROM knowledge_index WHERE knowledge_index MATCH ? ORDER BY rank LIMIT {limit}",
+                    (search_terms,))
+                for r in c.fetchall():
+                    context_results.append(f"[MEMORY]: {r[0]}")
+            except Exception:
+                pass
 
-        context_str = ""
-        if results['documents']:
-            for i, doc in enumerate(results['documents'][0]):
-                meta = results['metadatas'][0][i]
-                context_str += f"[{meta['timestamp']} - {meta['role']}]: {doc}\n"
+        # Short term history (Last 5 is usually enough)
+        c.execute("SELECT role, content FROM history ORDER BY id DESC LIMIT 5")
+        recent_rows = c.fetchall()
+        recent_context = [f"[{row[0].upper()}]: {row[1]}" for row in reversed(recent_rows)]
 
-        return context_str
+        conn.close()
+        return "\n".join(context_results + ["\n--- RECENT CHAT ---"] + recent_context)
 
-    # --- SKILLS / TOOLS ---
-    def save_skill(self, name, code, description, usage_example):
-        """Saves a python script as a 'Skill'."""
-        # We embed the description AND the usage example so semantic search finds it easily
-        searchable_text = f"{name}: {description}. Example: {usage_example}"
+    # ... (Rest of Tool DB methods remain same, but replace `sqlite3.connect` with `self._get_conn()`) ...
+    def save_skill(self, name, code, description):
+        try:
+            conn = self._get_conn()
+            c = conn.cursor()
+            c.execute("INSERT OR REPLACE INTO skills (name, code, description) VALUES (?, ?, ?)",
+                      (name, code, description))
+            conn.commit()
+            conn.close()
+            return f"✅ Skill '{name}' saved."
+        except Exception as e:
+            return f"DB Error: {e}"
 
-        self.skills_collection.upsert(
-            ids=[name],
-            documents=[code],  # The actual code is the document
-            metadatas=[{
-                "name": name,
-                "description": description,
-                "usage": usage_example
-            }],
-            embeddings=[self._get_embedding(searchable_text)]
-        )
-        return f"Skill '{name}' saved to Vector DB."
+    def list_skills(self):
+        conn = self._get_conn()
+        c = conn.cursor()
+        c.execute("SELECT name, description FROM skills")
+        rows = c.fetchall()
+        conn.close()
+        return rows
 
-    def retrieve_skill(self, query, n_results=1):
-        """Finds the code for a skill based on a natural language request."""
-        results = self.skills_collection.query(
-            query_embeddings=[self._get_embedding(query)],
-            n_results=n_results
-        )
+    def get_tool_code(self, name):
+        conn = self._get_conn()
+        c = conn.cursor()
+        c.execute("SELECT code FROM skills WHERE name = ?", (name,))
+        res = c.fetchone()
+        conn.close()
+        return res[0] if res else None
 
-        if results['ids'] and results['ids'][0]:
-            # Return the code and the metadata
-            skill_name = results['ids'][0][0]
-            code = results['documents'][0][0]
-            desc = results['metadatas'][0][0]['description']
-            return {"name": skill_name, "code": code, "description": desc}
-
-        return None
-
-    def list_all_skills(self):
-        """Returns a list of all available skill names."""
-        # Chroma doesn't have a cheap 'list all', so we peek
-        count = self.skills_collection.count()
-        if count == 0: return []
-        data = self.skills_collection.get(limit=count, include=['metadatas'])
-        return [m['name'] for m in data['metadatas']]
+    def delete_skill(self, name):
+        conn = self._get_conn()
+        c = conn.cursor()
+        c.execute("DELETE FROM skills WHERE name=?", (name,))
+        conn.commit()
+        conn.close()
+        return f"Deleted {name}"
 
 
-# Singleton Instance
 memory = MemoryManager()
-
-

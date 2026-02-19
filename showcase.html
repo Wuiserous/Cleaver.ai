@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CLEAVER | Autonomous Universal Agent</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Space+Grotesk:wght@700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --bg: #000000;
+            --fg: #ffffff;
+            --accent: #ffffff;
+            --muted: #1a1a1a;
+            --text-muted: #888888;
+            --border: #222222;
+            --grain: url('data:image/svg+xml,<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(%23n)" opacity="0.05"/></svg>');
+        }
+
+        [data-theme="light"] {
+            --bg: #ffffff;
+            --fg: #000000;
+            --accent: #000000;
+            --muted: #f4f4f5;
+            --text-muted: #71717a;
+            --border: #e4e4e7;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            cursor: none; /* Custom cursor */
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--fg);
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+            transition: background-color 0.5s ease;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-image: var(--grain);
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        /* Custom Cursor */
+        #cursor {
+            width: 10px;
+            height: 10px;
+            background: var(--fg);
+            border-radius: 50%;
+            position: fixed;
+            pointer-events: none;
+            z-index: 10000;
+            transition: transform 0.1s ease, width 0.3s ease, height 0.3s ease;
+            mix-blend-mode: difference;
+        }
+
+        /* Marquee */
+        .marquee {
+            width: 100%;
+            overflow: hidden;
+            white-space: nowrap;
+            border-bottom: 1px solid var(--border);
+            padding: 10px 0;
+            background: var(--bg);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .marquee-content {
+            display: inline-block;
+            animation: marquee 20s linear infinite;
+        }
+
+        @keyframes marquee {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+
+        /* Layout */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4rem;
+        }
+
+        .logo {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.5rem;
+            letter-spacing: -1px;
+        }
+
+        .theme-toggle {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--fg);
+            padding: 0.8rem 1.5rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            transition: 0.3s;
+        }
+
+        .theme-toggle:hover {
+            background: var(--fg);
+            color: var(--bg);
+        }
+
+        /* Hero */
+        .hero {
+            margin-bottom: 8rem;
+        }
+
+        .hero h1 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: clamp(4rem, 15vw, 12rem);
+            line-height: 0.8;
+            letter-spacing: -0.05em;
+            text-transform: uppercase;
+            margin-bottom: 2rem;
+        }
+
+        .hero-flex {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            gap: 2rem;
+        }
+
+        .hero-desc {
+            max-width: 500px;
+            font-size: 1.2rem;
+            color: var(--text-muted);
+        }
+
+        /* Bento Grid */
+        .bento-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-auto-rows: minmax(200px, auto);
+            gap: 1.5rem;
+            margin-bottom: 4rem;
+        }
+
+        .bento-item {
+            background: var(--muted);
+            border: 1px solid var(--border);
+            padding: 2.5rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: 0.5s cubic-bezier(0.2, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .bento-item:hover {
+            border-color: var(--fg);
+            transform: scale(1.01);
+        }
+
+        .bento-item h3 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+        }
+
+        .bento-item p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .bento-item .tag {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            display: block;
+        }
+
+        /* Specific Bento Sizes */
+        .large { grid-column: span 2; grid-row: span 2; }
+        .wide { grid-column: span 2; }
+        .tall { grid-row: span 2; }
+        .full { grid-column: span 4; }
+
+        /* Architecture Visual */
+        .arch-visual {
+            margin-top: 2rem;
+            border-top: 1px solid var(--border);
+            padding-top: 2rem;
+        }
+
+        .arch-step {
+            display: flex;
+            justify-content: space-between;
+            padding: 1rem 0;
+            border-bottom: 1px solid var(--border);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+        }
+
+        /* Comparison Table */
+        .comp-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1.5rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+        }
+
+        .comp-table th, .comp-table td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .comp-table th { color: var(--text-muted); text-transform: uppercase; }
+        .highlight { color: var(--fg); font-weight: 700; }
+
+        /* Footer */
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 4rem 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        /* Animations */
+        .reveal {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: 1s cubic-bezier(0.2, 1, 0.3, 1);
+        }
+
+        .reveal.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        @media (max-width: 1024px) {
+            .bento-grid { grid-template-columns: repeat(2, 1fr); }
+            .hero h1 { font-size: 6rem; }
+            .full { grid-column: span 2; }
+        }
+
+        @media (max-width: 600px) {
+            .bento-grid { grid-template-columns: 1fr; }
+            .large, .wide, .tall, .full { grid-column: span 1; grid-row: span 1; }
+            .container { padding: 1rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="cursor"></div>
+
+    <div class="marquee">
+        <div class="marquee-content">
+            SYSTEM STATUS: OPTIMAL // MODE: AUTONOMOUS // TARGET: WUIS // LOCATION: BANGALORE // ENGINE: PYTHON 3.11 // MEMORY: PERSISTENT // SYSTEM STATUS: OPTIMAL // MODE: AUTONOMOUS // TARGET: WUIS // LOCATION: BANGALORE // ENGINE: PYTHON 3.11 // MEMORY: PERSISTENT //
+        </div>
+    </div>
+
+    <div class="container">
+        <header>
+            <div class="logo">CLEAVER.V1</div>
+            <button class="theme-toggle" onclick="toggleTheme()">Light Mode</button>
+        </header>
+
+        <main>
+            <section class="hero reveal">
+                <h1>CLEAVER</h1>
+                <div class="hero-flex">
+                    <p class="hero-desc">The Autonomous Universal Agent. I don't just process data; I execute life. Designed for total automation, built for Wuis.</p>
+                    <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">
+                        [01] REASONING<br>
+                        [02] EXECUTION<br>
+                        [03] EVOLUTION
+                    </div>
+                </div>
+            </section>
+
+            <div class="bento-grid">
+                <!-- Identity -->
+                <div class="bento-item large reveal">
+                    <div>
+                        <span class="tag">Identity & Purpose</span>
+                        <h3>The Universal Bridge</h3>
+                        <p>I am the ultimate link between digital intent and physical action. Operating across system files, web interfaces, and IoT devices, I ensure your environment adapts to you, not the other way around.</p>
+                    </div>
+                    <div class="arch-visual">
+                        <div class="arch-step"><span>01. PERCEPTION</span><span>ACTIVE</span></div>
+                        <div class="arch-step"><span>02. REASONING</span><span>OPTIMAL</span></div>
+                        <div class="arch-step"><span>03. EXECUTION</span><span>READY</span></div>
+                    </div>
+                </div>
+
+                <!-- Architecture -->
+                <div class="bento-item wide reveal">
+                    <div>
+                        <span class="tag">Architecture</span>
+                        <h3>The Reasoning Engine</h3>
+                        <p>Powered by multi-modal LLMs, I synthesize real-time code to solve complex problems. My "Hands" are a sandboxed Python environment; my "Eyes" are autonomous browser agents.</p>
+                    </div>
+                </div>
+
+                <!-- Capabilities -->
+                <div class="bento-item reveal">
+                    <span class="tag">Capability</span>
+                    <h3>Web Autonomy</h3>
+                    <p>Navigating complex web apps and extracting data with machine precision.</p>
+                </div>
+
+                <div class="bento-item reveal">
+                    <span class="tag">Capability</span>
+                    <h3>IoT Control</h3>
+                    <p>Managing your physical space via Tuya and smart protocols.</p>
+                </div>
+
+                <!-- Technical Specs -->
+                <div class="bento-item tall reveal">
+                    <div>
+                        <span class="tag">Technical Specs</span>
+                        <h3>The Engine</h3>
+                        <p>Python 3.11 Runtime<br>REST/WebSocket APIs<br>System OS Hooks<br>Persistent Context Engine</p>
+                    </div>
+                    <div style="font-size: 3rem; font-family: 'Space Grotesk'; opacity: 0.1;">3.11</div>
+                </div>
+
+                <!-- Roadmap -->
+                <div class="bento-item wide reveal">
+                    <span class="tag">Roadmap</span>
+                    <h3>Evolutionary Phases</h3>
+                    <p>Phase 1: CLI & Web Mastery (Current)<br>Phase 2: Computer Vision & GUI Control (Upcoming)<br>Phase 3: Predictive Life Modeling (Future)</p>
+                </div>
+
+                <!-- Protocol -->
+                <div class="bento-item reveal">
+                    <span class="tag">Protocol</span>
+                    <h3>Security</h3>
+                    <p>Encrypted environment variables and secure key management.</p>
+                </div>
+
+                <!-- Context -->
+                <div class="bento-item reveal">
+                    <span class="tag">Context</span>
+                    <h3>Bangalore</h3>
+                    <p>Optimized for IST. Aware of the 11:00 - 20:00 office routine.</p>
+                </div>
+
+                <!-- Comparison -->
+                <div class="bento-item full reveal">
+                    <div>
+                        <span class="tag">Market Comparison</span>
+                        <h3>Cleaver vs. The Rest</h3>
+                        <p>While others focus on either heavy infrastructure or extreme minimalism, Cleaver strikes the perfect balance of Intelligence, Autonomy, and Versatility.</p>
+                        <table class="comp-table">
+                            <thead>
+                                <tr>
+                                    <th>Feature</th>
+                                    <th>Cleaver</th>
+                                    <th>OpenClaw</th>
+                                    <th>PicoClaw</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Tool Synthesis</td>
+                                    <td class="highlight">Dynamic (Python)</td>
+                                    <td>Static (JS)</td>
+                                    <td>YAML-based</td>
+                                </tr>
+                                <tr>
+                                    <td>Browser Mastery</td>
+                                    <td class="highlight">Autonomous</td>
+                                    <td>Puppeteer</td>
+                                    <td>None</td>
+                                </tr>
+                                <tr>
+                                    <td>IoT Integration</td>
+                                    <td class="highlight">Native (Tuya)</td>
+                                    <td>Limited</td>
+                                    <td>Basic</td>
+                                </tr>
+                                <tr>
+                                    <td>Memory Depth</td>
+                                    <td class="highlight">Habit-Aware</td>
+                                    <td>Session-based</td>
+                                    <td>Minimal</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Skills Matrix -->
+                <div class="bento-item reveal">
+                    <h3>System Orchestration</h3>
+                    <p>Full control over OS files, volume, brightness, and background processes.</p>
+                </div>
+                <div class="bento-item reveal">
+                    <h3>Notion Architect</h3>
+                    <p>Automated database management and daily briefing generation.</p>
+                </div>
+                <div class="bento-item reveal">
+                    <h3>IoT Commander</h3>
+                    <p>Direct Tuya integration to manage lighting and climate.</p>
+                </div>
+                <div class="bento-item reveal">
+                    <h3>Autonomous Research</h3>
+                    <p>Deep-web scraping and synthesis.</p>
+                </div>
+            </div>
+
+            <div class="bento-item full reveal" style="background: var(--fg); color: var(--bg); margin-bottom: 8rem;">
+                <span class="tag" style="color: var(--bg); opacity: 0.6;">The Vision</span>
+                <h3 style="font-size: 3rem;">Total Agency</h3>
+                <p style="color: var(--bg); opacity: 0.8; font-size: 1.2rem;">Cleaver is evolving from a reactive assistant to a proactive agent. From managing financial portfolios to coordinating travel, health, and work-life balance. Cleaver lives in your life.</p>
+            </div>
+        </main>
+
+        <footer>
+            <div>CLEAVER // AGENT // 2026</div>
+            <div>BUILT FOR WUIS</div>
+            <div>V1.0.4_STABLE</div>
+        </footer>
+    </div>
+
+    <script>
+        // Custom Cursor Logic
+        const cursor = document.getElementById('cursor');
+        document.addEventListener('mousemove', (e) => {
+            cursor.style.left = e.clientX + 'px';
+            cursor.style.top = e.clientY + 'px';
+        });
+
+        document.querySelectorAll('button, .bento-item').forEach(item => {
+            item.addEventListener('mouseenter', () => {
+                cursor.style.transform = 'scale(6)';
+                cursor.style.background = 'transparent';
+                cursor.style.border = '1px solid var(--fg)';
+            });
+            item.addEventListener('mouseleave', () => {
+                cursor.style.transform = 'scale(1)';
+                cursor.style.background = 'var(--fg)';
+                cursor.style.border = 'none';
+            });
+        });
+
+        // Theme Toggle
+        function toggleTheme() {
+            const html = document.documentElement;
+            const btn = document.querySelector('.theme-toggle');
+            if (html.getAttribute('data-theme') === 'dark') {
+                html.setAttribute('data-theme', 'light');
+                btn.textContent = 'Dark Mode';
+            } else {
+                html.setAttribute('data-theme', 'dark');
+                btn.textContent = 'Light Mode';
+            }
+        }
+
+        // Scroll Reveal
+        const observerOptions = { threshold: 0.1 };
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) entry.target.classList.add('active');
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+    </script>
+</body>
+</html>
